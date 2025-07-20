@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JQ-QMT 系统登录</title>
+    <title>JQ-QMT 系统注册</title>
     <style>
         * {
             margin: 0;
@@ -20,7 +20,7 @@
             justify-content: center;
         }
         
-        .login-container {
+        .register-container {
             background: white;
             padding: 2rem;
             border-radius: 10px;
@@ -29,18 +29,18 @@
             max-width: 400px;
         }
         
-        .login-header {
+        .register-header {
             text-align: center;
             margin-bottom: 2rem;
         }
         
-        .login-header h1 {
+        .register-header h1 {
             color: #333;
             font-size: 1.8rem;
             margin-bottom: 0.5rem;
         }
         
-        .login-header p {
+        .register-header p {
             color: #666;
             font-size: 0.9rem;
         }
@@ -56,22 +56,30 @@
             margin-bottom: 0.5rem;
         }
         
-        .form-group input {
+        .form-group input,
+        .form-group textarea {
             width: 100%;
             padding: 0.75rem;
             border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 1rem;
             transition: border-color 0.3s ease;
+            font-family: 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif;
         }
         
-        .form-group input:focus {
+        .form-group input:focus,
+        .form-group textarea:focus {
             outline: none;
             border-color: #667eea;
             box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
         }
         
-        .login-btn {
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        
+        .register-btn {
             width: 100%;
             padding: 0.75rem;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -81,11 +89,27 @@
             font-size: 1rem;
             cursor: pointer;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
+            margin-bottom: 1rem;
         }
         
-        .login-btn:hover {
+        .register-btn:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .login-link {
+            text-align: center;
+            margin-top: 1rem;
+        }
+        
+        .login-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .login-link a:hover {
+            text-decoration: underline;
         }
         
         .error-message {
@@ -124,33 +148,14 @@
             font-size: 0.8rem;
         }
         
-        .register-link {
-            text-align: center;
-            margin-top: 1rem;
-        }
-        
-        .register-link a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-        }
-        
-        .register-link a:hover {
-            text-decoration: underline;
-        }
-        
-        .remember-me {
-            display: flex;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-        
-        .remember-me input[type="checkbox"] {
-            margin-right: 0.5rem;
+        .password-hint {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 0.3rem;
         }
         
         @media (max-width: 480px) {
-            .login-container {
+            .register-container {
                 margin: 1rem;
                 padding: 1.5rem;
             }
@@ -158,10 +163,10 @@
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="login-header">
-            <h1>JQ-QMT 系统</h1>
-            <p>请登录您的账户</p>
+    <div class="register-container">
+        <div class="register-header">
+            <h1>用户注册</h1>
+            <p>创建您的JQ-QMT账户</p>
         </div>
         
         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -178,7 +183,7 @@
             {% endif %}
         {% endwith %}
         
-        <form method="POST" action="/login">
+        <form method="POST" action="/register">
             <div class="form-group">
                 <label for="username">用户名</label>
                 <input type="text" id="username" name="username" required 
@@ -190,23 +195,33 @@
                 <label for="password">密码</label>
                 <input type="password" id="password" name="password" required 
                        placeholder="请输入密码">
+                <div class="password-hint">密码长度至少6位</div>
             </div>
             
-            <div class="remember-me">
-                <input type="checkbox" id="remember" name="remember" value="1">
-                <label for="remember">记住我（7天）</label>
+            <div class="form-group">
+                <label for="confirm_password">确认密码</label>
+                <input type="password" id="confirm_password" name="confirm_password" required 
+                       placeholder="请再次输入密码">
             </div>
             
-            <button type="submit" class="login-btn">登录</button>
+            <div class="form-group">
+                <label for="strategies">可查看的策略（可选）</label>
+                <textarea id="strategies" name="strategies" 
+                          placeholder="请输入策略名称，每行一个策略，例如：&#10;strategy_a&#10;strategy_b&#10;example_strategy" 
+                          rows="4"></textarea>
+                <div class="password-hint">每行一个策略名称，留空则无法查看任何策略</div>
+            </div>
+            
+            <button type="submit" class="register-btn">注册</button>
         </form>
         
-        <div class="register-link">
-            <p>还没有账户？ <a href="/register">立即注册</a></p>
+        <div class="login-link">
+            <p>已有账户？ <a href="/login">立即登录</a></p>
         </div>
         
         <div class="footer">
             <p>JQ-QMT 量化交易系统 &copy; 2025</p>
-            <p>默认管理员: admin / admin123</p>
+            <p>注册用户将创建为普通用户权限</p>
         </div>
     </div>
 </body>
