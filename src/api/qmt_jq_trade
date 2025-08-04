@@ -71,8 +71,33 @@ class QMTAPI:
             print("获取持仓数据失败，跳过本次同步")
             return
     
-        # 检查是否需要更新
+        # 检查是否需要更新 - 如果远程更新时间等于本地更新时间，跳过更新
         if g.latest_update_time and current_update_time == g.latest_update_time:
+            return
+
+        # 新增逻辑：如果current_update_time < latest_update_time，只对比打印差异，不下单
+        if g.latest_update_time and current_update_time < g.latest_update_time:
+            print(f"\n=== 检测到时间回退：远程时间({current_update_time}) < 本地时间({g.latest_update_time}) ===")
+            print(f"存在{current_update_time}未同步的仓位，本轮只进行持仓对比，不执行下单操作")
+            
+            # 只检查持仓一致性，不进行下单
+            differences = self.check_positions_consistency(account)
+            
+            if differences:
+                print("\n=== 持仓差异详情 ===")
+                print(f"{'代码':<10} {'目标':>8} {'当前':>8} {'差异':>8} {'操作建议':<10}")
+                print("-" * 50)
+                for code, info in sorted(differences.items()):
+                    diff = info['diff']
+                    operation = "卖出" if diff > 0 else "买入"
+                    print(f"{code:<10} {info['target']:>8} {info['current']:>8} {diff:>8} {operation}({abs(diff)}股)")
+            else:
+                print("持仓完全一致，无差异")
+            
+            # 更新latest_update_time为current_update_time
+            g.latest_update_time = current_update_time
+            print(f"更新latest_update_time为: {g.latest_update_time}")
+            print("=== 时间回退处理完成 ===\n")
             return
 
         print("\n=== 开始持仓同步 ===")
@@ -568,13 +593,20 @@ def adjust(ContextInfo):
 def init(ContextInfo):
     g.account = account
     print(f"!!!!当前监控策略:{g.strategy_names}")
-    # 计算今天的9:30
+    
+    # 初始化latest_update_time为当天的0点
     now = datetime.now()
+    
+    # 计算今天的9:30
     current_time = now.time()
     if current_time <= datetime.strptime("15:00:00", "%H:%M:%S").time() or DEBUG:
         g.first_run = now.replace(hour=9, minute=30, second=0, microsecond=0)
     else:
         g.first_run = now.replace(hour=9, minute=30, second=0, microsecond=0) + timedelta(days=1)
     print(f"设置第一次运行时间:{g.first_run}")
+
+    g.latest_update_time = now.strftime('%Y-%m-%d %H:%M:%S')
+    print(f"初始化latest_update_time为{g.latest_update_time}, 之前更新的策略将不同步，如果需要同步请注释掉此行")
+
     # 设置调度，从first_run开始运行
     schedule_run(ContextInfo, adjust, g.first_run)
