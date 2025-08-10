@@ -177,14 +177,14 @@ class QMTAPI:
             if order.m_nOrderStatus not in [56, 57,  53, 54]  # 已成，废单，部撤，已撤
         ]
         print("\n当前所有订单状态：")
-        print(f"{'订单编号':<12} {'代码':<10} {'名称':<8} {'方向':<6} {'总数量':>8} {'成交量':>8} "
+        print(f"{'订单编号':<12} {'代码':<10} {'名称':<8} {'方向':<6} {'委托类别':<8} {'总数量':>8} {'成交量':>8} "
               f"{'价格':>8} {'状态':>6} {'备注':<20}")
-        print("-" * 90)
+        print("-" * 98)
         for order in orders:
             direction = "买入" if order.m_nOffsetFlag == 48 else "卖出"
             print(f"{order.m_strOrderSysID:<12} {order.m_strInstrumentID:<10} "
                   f"{order.m_strInstrumentName[:8]:<8} {direction:<6} "
-                  f"{order.m_nVolumeTotalOriginal:>8} {order.m_nVolumeTraded:>8} "
+                  f"{order.m_nEntrustType:<8} {order.m_nVolumeTotalOriginal:>8} {order.m_nVolumeTraded:>8} "
                   f"{order.m_dLimitPrice:>8.2f} {order.m_nOrderStatus:>6} "
                   f"{order.m_strRemark[:20]:<20}")
         if not orders:
@@ -462,6 +462,32 @@ class QMTAPI:
                 order_price = calculated_price
                 print(f"使用计算价格下单: {order_price}, 计算价格:{calculated_price}, 最新价格:{price}, 出价精度:{precision}")
             op_type = 24  # 卖出
+        
+        # 如果是买入单，检查资金是否足够
+        if direction == 'buy':
+            # 获取账户资金信息
+            account_info = get_trade_detail_data(g.account, 'STOCK', 'ACCOUNT')
+            if not account_info:
+                print(f"获取账户资金信息失败，无法下买单: {code}")
+                return
+            
+            # 计算所需资金（股票价格 + 佣金）
+            stock_cost = order_price * volume  # 股票成本
+            commission_rate = 0.0001  # 佣金万分之一
+            commission = max(stock_cost * commission_rate, 5.0)  # 佣金最低5元
+            total_cost = stock_cost + commission  # 总成本
+            
+            # 获取可用资金
+            available_cash = account_info[0].m_dAvailable if account_info else 0
+            
+            if available_cash < total_cost:
+                print(f"资金不足，无法下买单: {code}")
+                print(f"  所需资金: {total_cost:.2f} 元 (股票: {stock_cost:.2f}, 佣金: {commission:.2f})")
+                print(f"  可用资金: {available_cash:.2f} 元")
+                print(f"  资金缺口: {total_cost - available_cash:.2f} 元")
+                return
+            
+            print(f"资金检查通过: 所需 {total_cost:.2f} 元，可用 {available_cash:.2f} 元")
         
         user_order_id = f"{retry}_{datetime.now()}"
         # 执行下单
