@@ -29,7 +29,6 @@ class G():
 
 g = G()
 
-
 class QMTAPI:
     def __init__(self, C, strategy_names=None):
         self.api_url = API_URL
@@ -184,7 +183,7 @@ class QMTAPI:
             direction = "买入" if order.m_nOffsetFlag == 48 else "卖出"
             print(f"{order.m_strOrderSysID:<12} {order.m_strInstrumentID:<10} "
                   f"{order.m_strInstrumentName[:8]:<8} {direction:<6} "
-                  f"{order.m_nEntrustType:<8} {order.m_nVolumeTotalOriginal:>8} {order.m_nVolumeTraded:>8} "
+                  f"{order.m_eEntrustType:<8} {order.m_nVolumeTotalOriginal:>8} {order.m_nVolumeTraded:>8} "
                   f"{order.m_dLimitPrice:>8.2f} {order.m_nOrderStatus:>6} "
                   f"{order.m_strRemark[:20]:<20}")
         if not orders:
@@ -462,7 +461,6 @@ class QMTAPI:
                 order_price = calculated_price
                 print(f"使用计算价格下单: {order_price}, 计算价格:{calculated_price}, 最新价格:{price}, 出价精度:{precision}")
             op_type = 24  # 卖出
-        
         # 如果是买入单，检查资金是否足够
         if direction == 'buy':
             # 获取账户资金信息

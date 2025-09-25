@@ -229,6 +229,33 @@ def get_all_positions():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/v1/strategies/refresh', methods=['POST'])
+@require_internal_password
+def refresh_strategies_time():
+    """刷新所有策略的时间为当前时间（需要密码验证）"""
+    try:
+        result = StrategyPosition.refresh_all_strategies_time()
+        
+        if result['success']:
+            return jsonify({
+                'message': result['message'],
+                'updated_count': result['updated_count'],
+                'update_time': result['update_time'],
+                'success': True
+            })
+        else:
+            return jsonify({
+                'error': result['message'],
+                'updated_count': result['updated_count'],
+                'success': False
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'error': f'刷新策略时间失败: {str(e)}',
+            'success': False
+        }), 500
+
 @app.route('/')
 def index():
     return render_template('index.html')

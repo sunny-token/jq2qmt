@@ -149,6 +149,45 @@ class StrategyPosition(db.Model):
             'update_time': latest_update_time
         }
 
+    @staticmethod
+    def refresh_all_strategies_time():
+        """刷新所有有效策略的更新时间为当前时间"""
+        try:
+            # 获取所有策略
+            strategies = StrategyPosition.query.all()
+            
+            if not strategies:
+                return {
+                    'success': False,
+                    'message': '没有找到任何策略',
+                    'updated_count': 0
+                }
+            
+            # 更新所有策略的时间
+            current_time = datetime.now()
+            updated_count = 0
+            
+            for strategy in strategies:
+                strategy.update_time = current_time
+                updated_count += 1
+            
+            db.session.commit()
+            
+            return {
+                'success': True,
+                'message': f'成功刷新了 {updated_count} 个策略的时间',
+                'updated_count': updated_count,
+                'update_time': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+        except Exception as e:
+            db.session.rollback()
+            return {
+                'success': False,
+                'message': f'刷新策略时间失败: {str(e)}',
+                'updated_count': 0
+            }
+
 
 class InternalPassword(db.Model):
     __tablename__ = 'internal_passwords'
