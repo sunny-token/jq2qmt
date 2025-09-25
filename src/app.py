@@ -202,7 +202,43 @@ def get_total_positions():
         # 是否包含调整策略，默认包含
         include_adjustments = request.args.get('include_adjustments', 'true').lower() == 'true'
         
-        result = StrategyPosition.get_total_positions(strategy_names, include_adjustments)
+        # 解析带系数的策略名
+        parsed_strategies = []
+        if strategy_names:
+            for strategy_name in strategy_names:
+                strategy_name = strategy_name.strip()
+                # 检查是否包含系数（以x或X分隔）
+                if 'x' in strategy_name.lower():
+                    # 找到x或X的位置
+                    lower_name = strategy_name.lower()
+                    x_pos = lower_name.find('x')
+                    if x_pos > 0 and x_pos < len(strategy_name) - 1:
+                        try:
+                            base_name = strategy_name[:x_pos].strip()
+                            coefficient_str = strategy_name[x_pos + 1:].strip()
+                            coefficient = float(coefficient_str)
+                            parsed_strategies.append({
+                                'name': base_name,
+                                'coefficient': coefficient
+                            })
+                        except ValueError:
+                            # 如果解析系数失败，当作普通策略名处理
+                            parsed_strategies.append({
+                                'name': strategy_name,
+                                'coefficient': 1.0
+                            })
+                    else:
+                        parsed_strategies.append({
+                            'name': strategy_name,
+                            'coefficient': 1.0
+                        })
+                else:
+                    parsed_strategies.append({
+                        'name': strategy_name,
+                        'coefficient': 1.0
+                    })
+        
+        result = StrategyPosition.get_total_positions_with_coefficients(parsed_strategies, include_adjustments)
         return jsonify({
             'positions': result['positions'],
             'update_time': result['update_time'].strftime('%Y-%m-%d %H:%M:%S') if result['update_time'] else None
