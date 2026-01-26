@@ -156,6 +156,7 @@ class G:
     def __init__(self):
         self.latest_update_time = None
         self.check_orders_scheduled = False  # 新增：标记是否有计划中的检查任务
+        self.upload_positions = False  # 禁止上传持仓，防止覆盖数据库中的策略目标
         self.strategy_name = "sync_positions"
         self.check_orders_interval = 5  # 检查订单状态的时间间隔（秒）
         self.sync_positions_interval = 1  # 持仓同步的时间间隔（秒）
@@ -1659,6 +1660,15 @@ class MiniQMTAPI:
             ... else:
             ...     print(f"同步失败: {result['message']}")
         """
+        if not g.upload_positions:
+            print("提示: 全局配置已禁用持仓回写 (g.upload_positions=False)，跳过同步")
+            return {
+                "success": True,
+                "message": "Upload disabled by config",
+                "positions_count": 0,
+                "positions": [],
+            }
+
         if self.trader is None:
             return {
                 "success": False,
