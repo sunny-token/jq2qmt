@@ -156,7 +156,7 @@ class G:
     def __init__(self):
         self.latest_update_time = None
         self.check_orders_scheduled = False  # 新增：标记是否有计划中的检查任务
-        self.upload_positions = False  # 禁止上传持仓，防止覆盖数据库中的策略目标
+
         self.strategy_name = "sync_positions"
         self.check_orders_interval = 5  # 检查订单状态的时间间隔（秒）
         self.sync_positions_interval = 1  # 持仓同步的时间间隔（秒）
@@ -228,43 +228,7 @@ class MiniQMTTraderCallback(XtQuantTraderCallback):
             f"成交回调: {trade.stock_code} {trade.traded_volume} {traded_price} 时间: {traded_time}"
         )
 
-        # 成交后异步同步持仓到数据库（使用防抖机制避免频繁同步）
-        def delayed_sync():
-            """延迟同步持仓（防抖机制）"""
-            try:
-                # 延迟执行，等待可能的连续成交
-                time.sleep(g.sync_delay)
 
-                # 延迟后再次检查是否需要同步（防抖：距离上次同步至少间隔 sync_delay 秒）
-                now = datetime.now()
-                if (
-                    g.last_sync_time
-                    and (now - g.last_sync_time).total_seconds() < g.sync_delay
-                ):
-                    return  # 距离上次同步时间太短，跳过本次同步
-
-                if g.trader and g.trader.trader:
-                    # 使用配置的策略名称（取第一个）作为同步策略名称
-                    sync_strategy_name = (
-                        g.strategy_names[0] if g.strategy_names else "实际持仓"
-                    )
-                    sync_result = g.trader.sync_positions_to_database(
-                        strategy_name=sync_strategy_name,
-                        internal_password=g.internal_password,
-                    )
-                    if sync_result["success"]:
-                        print(
-                            f"成交后持仓同步成功: 共 {sync_result['positions_count']} 个持仓"
-                        )
-                        g.last_sync_time = now
-                    else:
-                        print(f"成交后持仓同步失败: {sync_result['message']}")
-            except Exception as e:
-                print(f"成交后持仓同步异常: {str(e)}")
-
-        # 在独立线程中延迟执行同步，避免阻塞成交回调
-        sync_thread = threading.Thread(target=delayed_sync, daemon=True)
-        sync_thread.start()
 
     def on_stock_position(self, position):
         """持仓变动回调"""
@@ -1625,183 +1589,7 @@ class MiniQMTAPI:
             return f"{code}.XSHE"
         return qmt_code
 
-    def sync_positions_to_database(
-        self, strategy_name: str, internal_password: str = "admin123"
-    ) -> Dict:
-        """同步MiniQMT持仓到数据库
 
-        从MiniQMT获取实际持仓，过滤掉港股通、新股申购等不需要的持仓，
-        转换为聚宽代码格式后同步到数据库。
-
-        注意：total_asset 和 internal_password 不再在此方法中更新，
-        它们会在每天下午3点通过 update_total_asset_only 方法单独更新。
-
-        Args:
-            strategy_name: 策略名称，用于标识数据库中的持仓记录
-            internal_password: 内部API密码（已废弃，保留参数以兼容旧代码）
-
-        Returns:
-            包含同步结果的字典，格式：
-            {
-                'success': bool,           # 是否成功
-                'message': str,            # 结果消息
-                'positions_count': int,    # 同步的持仓数量
-                'positions': list,         # 持仓列表，每个持仓包含：
-                                          #   - code: str, 聚宽代码格式
-                                          #   - volume: int, 持仓数量
-                                          #   - cost: float, 成本价
-            }
-
-        使用示例:
-            >>> api = MiniQMTAPI(account_id="62048093")
-            >>> result = api.sync_positions_to_database("实际持仓")
-            >>> if result['success']:
-            ...     print(f"同步成功，共 {result['positions_count']} 个持仓")
-            ... else:
-            ...     print(f"同步失败: {result['message']}")
-        """
-        if not g.upload_positions:
-            print("提示: 全局配置已禁用持仓回写 (g.upload_positions=False)，跳过同步")
-            return {
-                "success": True,
-                "message": "Upload disabled by config",
-                "positions_count": 0,
-                "positions": [],
-            }
-
-        if self.trader is None:
-            return {
-                "success": False,
-                "message": "交易连接未初始化，无法获取持仓",
-                "positions_count": 0,
-                "positions": [],
-            }
-
-        try:
-            # 获取MiniQMT实际持仓
-            account = StockAccount(self.account_id)
-            qmt_positions_data = self.trader.query_stock_positions(account)
-
-            # 转换为数据库格式并过滤
-            positions = []
-            for position in qmt_positions_data:
-                # 过滤不需要的持仓
-                should_filter, reason = self._should_filter_position(
-                    position.stock_code
-                )
-                if should_filter:
-                    print(
-                        f"过滤持仓: {position.stock_code} - {reason} (数量: {position.volume})"
-                    )
-                    continue
-
-                # 跳过持仓为0的股票
-                if position.volume <= 0:
-                    continue
-
-                # 转换为聚宽代码
-                jq_code = self._convert_qmt_code_to_jq(position.stock_code)
-
-                # 获取成本价，优先使用 avg_price，如果没有则使用 cost_price
-                cost_price = (
-                    getattr(position, "avg_price", None)
-                    or getattr(position, "cost_price", None)
-                    or 0.0
-                )
-
-                # 如果成本价为0，尝试获取当前价格作为默认值
-                if cost_price <= 0:
-                    try:
-                        tick_data = xtdata.get_full_tick([position.stock_code])
-                        if (
-                            tick_data
-                            and position.stock_code in tick_data
-                            and "lastPrice" in tick_data[position.stock_code]
-                        ):
-                            cost_price = tick_data[position.stock_code]["lastPrice"]
-                            print(
-                                f"  警告: {position.stock_code} 成本价为0，使用当前价格 {cost_price} 作为成本价"
-                            )
-                    except Exception as e:
-                        print(
-                            f"  警告: 无法获取 {position.stock_code} 的当前价格: {str(e)}"
-                        )
-
-                # 构建持仓数据（不包含 total_asset，它将在策略层级保存）
-                pos_data = {
-                    "code": jq_code,
-                    "volume": int(position.volume),
-                    "cost": float(cost_price),
-                }
-
-                positions.append(pos_data)
-
-            if not positions:
-                return {
-                    "success": True,
-                    "message": "没有需要同步的持仓",
-                    "positions_count": 0,
-                    "positions": [],
-                }
-
-            # 调用内部API接口同步到数据库（不包含 total_asset，但需要传递 internal_password 用于认证）
-            url = f"{self.api_url}/api/v1/positions/update/internal"
-            data = {
-                "strategy_name": strategy_name,
-                "positions": positions,
-                "internal_password": internal_password,  # 需要传递密码用于API认证
-            }
-            headers = {"Content-Type": "application/json"}
-
-            response = requests.post(url, json=data, headers=headers, timeout=10)
-            if response.status_code != 200:
-                error_msg = (
-                    f"同步持仓失败: HTTP {response.status_code} - {response.text}"
-                )
-                print(error_msg)
-                return {
-                    "success": False,
-                    "message": error_msg,
-                    "positions_count": len(positions),
-                    "positions": positions,
-                }
-
-            result = response.json()
-            print(f"持仓同步成功: 策略={strategy_name}, 持仓数量={len(positions)}")
-            return {
-                "success": True,
-                "message": result.get("message", "持仓同步成功"),
-                "positions_count": len(positions),
-                "positions": positions,
-            }
-
-        except requests.exceptions.Timeout:
-            error_msg = "同步持仓超时"
-            print(error_msg)
-            return {
-                "success": False,
-                "message": error_msg,
-                "positions_count": 0,
-                "positions": [],
-            }
-        except requests.exceptions.RequestException as e:
-            error_msg = f"同步持仓网络错误: {str(e)}"
-            print(error_msg)
-            return {
-                "success": False,
-                "message": error_msg,
-                "positions_count": 0,
-                "positions": [],
-            }
-        except Exception as e:
-            error_msg = f"同步持仓异常: {str(e)}"
-            print(error_msg)
-            return {
-                "success": False,
-                "message": error_msg,
-                "positions_count": 0,
-                "positions": [],
-            }
 
     def update_total_asset_only(
         self, strategy_name: str, internal_password: str = "admin123"
@@ -2249,23 +2037,7 @@ def init(account_id: str):
     timer_thread = threading.Thread(target=timer_loop, daemon=True)
     timer_thread.start()
 
-    # 启动时同步持仓到数据库
-    if g.trader and g.trader.trader:
-        print("\n=== 启动时同步持仓到数据库 ===")
-        # 等待一下确保交易连接完全建立
-        time.sleep(2)
-        # 使用配置的策略名称（取第一个）作为同步策略名称
-        sync_strategy_name = g.strategy_names[0] if g.strategy_names else "实际持仓"
-        sync_result = g.trader.sync_positions_to_database(
-            strategy_name=sync_strategy_name, internal_password=g.internal_password
-        )
-        if sync_result["success"]:
-            print(f"启动时持仓同步成功: 共 {sync_result['positions_count']} 个持仓")
-        else:
-            print(f"启动时持仓同步失败: {sync_result['message']}")
-        print("=== 启动时持仓同步完成 ===\n")
-    else:
-        print("警告: 交易连接未建立，跳过启动时持仓同步")
+
 
 
 # 主运行函数
