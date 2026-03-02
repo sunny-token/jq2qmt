@@ -172,7 +172,7 @@ class G:
         self.sync_start_hour = 9  # 持仓同步开始时间（小时）
         self.sync_start_minute = 26  # 持仓同步开始时间（分钟），从9:26开始同步
         self.sync_start_millisecond = 0  # 持仓同步开始时间（毫秒），支持毫秒级精度
-        self.market_open_delay = 1  # 9:30开盘时下单延迟（秒），避免交易所未准备好
+        self.market_open_delay = 0  # 9:30开盘时下单延迟（秒），避免交易所未准备好
         self.use_protected_market_order = True  # 是否使用保护限价市价单，True时在9:30使用市价单（最优五档剩转限/即时成交剩余撤销），可避免价格笼子限制导致废单
         self.pending_orders = (
             None  # 待执行的交易操作记录（9:26-9:30之间记录，9:30后执行）
@@ -365,11 +365,13 @@ class MiniQMTAPI:
                     print(
                         f"有订单撤销，等待待撤订单状态更新,等待{g.check_orders_interval}秒后重试..."
                     )
+                    time.sleep(g.check_orders_interval)
                     continue
                 elif status == WaitingOrderStatus.PENDING_CANCEL:
                     print(
                         f"等待未报和待撤订单状态更新,等待{g.check_orders_interval}秒后重试..."
                     )
+                    time.sleep(g.check_orders_interval)
                     continue
                 elif status == WaitingOrderStatus.ERROR:
                     print("检查订单状态时发生错误，延迟执行待执行操作")
@@ -547,11 +549,13 @@ class MiniQMTAPI:
                     print(
                         f"有订单撤销，等待待撤订单状态更新,等待{g.check_orders_interval}秒后重试..."
                     )
+                    time.sleep(g.check_orders_interval)
                     continue
                 elif status == WaitingOrderStatus.PENDING_CANCEL:
                     print(
                         f"等待未报和待撤订单状态更新,等待{g.check_orders_interval}秒后重试..."
                     )
+                    time.sleep(g.check_orders_interval)
                     continue
                 elif status == WaitingOrderStatus.ERROR:
                     print("检查订单状态时发生错误，跳过本次同步")
@@ -956,7 +960,8 @@ class MiniQMTAPI:
     def try_orders_complete(self):
         """检查订单状态"""
         print("\n*** 订单状态检查 ***")
-        time.sleep(g.check_orders_interval)
+        # 移除初始等待，由调用方在需要时等待
+        # time.sleep(g.check_orders_interval)
 
         if self.trader is None:
             print("交易连接未初始化，无法检查订单状态")
