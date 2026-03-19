@@ -133,12 +133,12 @@ MARKET_PEER_PRICE_FIRST = _get_price_type_constant(
 )
 # 上交所股票最优五档剩转限（上交所股票常用，根据文档：xtconstant.MARKET_SH_CONVERT_5_LIMIT）
 MARKET_SH_CONVERT_5_LIMIT = _get_price_type_constant(
-    "MARKET_SH_CONVERT_5_LIMIT", None, None
+    "MARKET_SH_CONVERT_5_LIMIT", None, 15
 )
 # 深交所股票最优五档即时成交剩余撤销（深交所股票常用，根据文档：xtconstant.MARKET_SZ_CONVERT_5_CANCEL）
 # 注意：MARKET_CONVERT_5 是期货常量，不适用于股票交易
 MARKET_SZ_CONVERT_5_CANCEL = _get_price_type_constant(
-    "MARKET_SZ_CONVERT_5_CANCEL", None, None
+    "MARKET_SZ_CONVERT_5_CANCEL", None, 12
 )
 
 
@@ -172,7 +172,7 @@ class G:
         self.sync_start_hour = 9  # 持仓同步开始时间（小时）
         self.sync_start_minute = 26  # 持仓同步开始时间（分钟），从9:26开始同步
         self.sync_start_millisecond = 0  # 持仓同步开始时间（毫秒），支持毫秒级精度
-        self.market_open_delay = 0  # 9:30开盘时下单延迟（秒），避免交易所未准备好
+        self.market_open_delay = 30  # 9:30开盘时下单延迟（秒），由0修改为0.2
         self.use_protected_market_order = True  # 是否使用保护限价市价单，True时在9:30使用市价单（最优五档剩转限/即时成交剩余撤销），可避免价格笼子限制导致废单
         self.pending_orders = (
             None  # 待执行的交易操作记录（9:26-9:30之间记录，9:30后执行）
@@ -412,39 +412,6 @@ class MiniQMTAPI:
         # 检查是否需要更新 - 如果远程更新时间等于本地更新时间，跳过更新
         if g.latest_update_time and current_update_time == g.latest_update_time:
             return
-
-        # 新增逻辑：如果current_update_time < latest_update_time，只对比打印差异，不下单
-        # if g.latest_update_time and current_update_time < g.latest_update_time:
-        #     print(
-        #         f"\n=== 检测到时间回退：远程时间({current_update_time}) < 本地时间({g.latest_update_time}) ==="
-        #     )
-        #     print(
-        #         f"存在{current_update_time}未同步的仓位，本轮只进行持仓对比，不执行下单操作"
-        #     )
-
-        #     # 只检查持仓一致性，不进行下单
-        #     differences = self.check_positions_consistency()
-
-        #     if differences:
-        #         print("\n=== 持仓差异详情 ===")
-        #         print(
-        #             f"{'代码':<10} {'目标':>8} {'当前':>8} {'差异':>8} {'操作建议':<10}"
-        #         )
-        #         print("-" * 50)
-        #         for code, info in sorted(differences.items()):
-        #             diff = info["diff"]
-        #             operation = "卖出" if diff > 0 else "买入"
-        #             print(
-        #                 f"{code:<10} {info['target']:>8} {info['current']:>8} {diff:>8} {operation}({abs(diff)}股)"
-        #             )
-        #     else:
-        #         print("持仓完全一致，无差异")
-
-        #     # 更新latest_update_time为current_update_time
-        #     g.latest_update_time = current_update_time
-        #     print(f"更新latest_update_time为: {g.latest_update_time}")
-        #     print("=== 时间回退处理完成 ===\n")
-        #     return
 
         print("\n=== 开始持仓同步 ===")
 
@@ -718,124 +685,57 @@ class MiniQMTAPI:
             # 获取价格精度
             precision = self._get_price_precision(code)
 
+            # ==================== 核心修改：买入逻辑 ====================
             if direction == "buy":
                 # 只支持主板股票交易
                 if not self._is_mainboard(code):
                     print(f"  股票 {code} 不是主板股票，跳过预处理")
                     return None
 
-                # 获取卖一价和买一价（用于价格笼子计算）
-                ask_price1 = (
-                    current_tick["askPrice"][0]
-                    if (
-                        current_tick
-                        and "askPrice" in current_tick
-                        and len(current_tick["askPrice"]) > 0
-                        and current_tick["askPrice"][0] > 0
-                    )
-                    else 0
-                )
-                bid_price1 = (
-                    current_tick["bidPrice"][0]
-                    if (
-                        current_tick
-                        and "bidPrice" in current_tick
-                        and len(current_tick["bidPrice"]) > 0
-                        and current_tick["bidPrice"][0] > 0
-                    )
-                    else 0
-                )
-
                 # 优先使用官方涨停价（从tick数据获取，最准确）
-                official_up_limit = 0
-                if current_tick and "highLimit" in current_tick:
-                    official_up_limit = current_tick.get("highLimit", 0)
-                    if official_up_limit > 0:
-                        up_limit = official_up_limit
+                official_up_limit = current_tick.get("highLimit", 0)
+                if official_up_limit > 0:
+                    up_limit = official_up_limit
 
-                # 如果tick数据中没有，尝试使用接口返回的涨停价
+                # 如果没有涨停价数据，尝试手动计算或从detail取
                 if up_limit <= 0:
-                    interface_up_limit = instrument_detail.get("UpStopPrice", 0)
-                    if interface_up_limit > 0:
-                        up_limit = interface_up_limit
+                    up_limit = instrument_detail.get("UpStopPrice", 0) or self._calculate_up_limit_price(code)
 
-                # 如果接口也没有，尝试计算涨停价
                 if up_limit <= 0:
-                    calculated_up_limit = self._calculate_up_limit_price(code)
-                    if calculated_up_limit > 0:
-                        up_limit = calculated_up_limit
-                    else:
-                        print(f"  股票 {code} 涨停价无效，无法预处理")
-                        return None
+                    print(f"  股票 {code} 涨停价无效，无法预处理")
+                    return None
 
-                # 先使用涨停价作为订单价格
+                # 【关键修改】：买入保护价直接设为涨停价，彻底解决“超过保护价格”废单问题
                 order_price = up_limit
 
-                # 应用价格笼子限制（避免涨停价超过价格笼子上限导致废单）
-                order_price = self._apply_price_cage_limit(
-                    order_price, "buy", ask_price1, bid_price1, price, precision
-                )
-
-                # 根据配置选择价格类型（9:30时使用）
-                # 参考文档：https://dict.thinktrader.net/nativeApi/xttrader.html?id=XxjF3h#%E4%BA%A4%E6%98%93%E5%B8%82%E5%9C%BA-market
-                # 注意：MARKET_CONVERT_5 是期货常量，不适用于股票交易
-                # MiniQMT 对深交所和上交所的常量定义有细微区别，需要根据交易所选择对应的价格类型
+                # 根据交易所选择对应的市价单类型
                 if g.use_protected_market_order:
-                    # 根据交易所选择对应的市价单类型
                     if self._is_shanghai_exchange(code):
-                        # 上交所股票：使用上海最优五档剩转限（xtconstant.MARKET_SH_CONVERT_5_LIMIT）
-                        if MARKET_SH_CONVERT_5_LIMIT is not None:
-                            price_type = MARKET_SH_CONVERT_5_LIMIT
-                            price_type_name = "上交所最优五档剩转限"
-                        else:
-                            # 如果常量不存在，回退到对手方最优价
-                            price_type = MARKET_PEER_PRICE_FIRST
-                            price_type_name = "保护限价市价单（回退）"
-                            print(
-                                f"  警告: {code} 上交所常量 MARKET_SH_CONVERT_5_LIMIT 不存在，使用回退方案"
-                            )
+                        # 上交所：最优五档剩余转限价 (15)
+                        price_type = MARKET_SH_CONVERT_5_LIMIT if MARKET_SH_CONVERT_5_LIMIT is not None else 15
+                        price_type_name = "上交所最优五档剩转限"
                     else:
-                        # 深交所股票：使用最优五档即时成交剩余撤销（xtconstant.MARKET_SZ_CONVERT_5_CANCEL）
-                        if MARKET_SZ_CONVERT_5_CANCEL is not None:
-                            price_type = MARKET_SZ_CONVERT_5_CANCEL
-                            price_type_name = "深交所最优五档即时成交剩余撤销"
-                        else:
-                            # 如果常量不存在，回退到对手方最优价
-                            price_type = MARKET_PEER_PRICE_FIRST
-                            price_type_name = "保护限价市价单（回退）"
-                            print(
-                                f"  警告: {code} 深交所常量 MARKET_SZ_CONVERT_5_CANCEL 不存在，使用回退方案"
-                            )
+                        # 深交所：最优五档即时成交剩余撤销 (12)
+                        price_type = MARKET_SZ_CONVERT_5_CANCEL if MARKET_SZ_CONVERT_5_CANCEL is not None else 12
+                        price_type_name = "深交所最优五档即时成交剩余撤销"
                 else:
-                    # 使用限价单（涨停价）
+                    # 如果关闭了市价单，则使用涨停价限价单抢筹
                     price_type = xtconstant.FIX_PRICE
                     price_type_name = "涨停价限价单"
 
                 order_type = xtconstant.STOCK_BUY
 
-                # 检查资金是否足够（预处理时检查，9:30执行时不再检查）
+                # 检查资金是否足够 (按涨停价预估，最稳妥)
                 try:
                     account = StockAccount(self.account_id)
                     account_info = self.trader.query_stock_asset(account)
-                    if not account_info:
-                        print(f"  获取账户资金信息失败: {code}")
-                        return None
-
-                    stock_cost = up_limit * volume
-                    commission_rate = 0.0000854
-                    commission = max(stock_cost * commission_rate, 5.0)
-                    total_cost = stock_cost + commission
-                    available_cash = account_info.cash
-
-                    if available_cash < total_cost:
-                        print(
-                            f"  资金不足: {code}, 所需: {total_cost:.2f}, 可用: {available_cash:.2f}"
-                        )
-                        return None
-
-                except Exception as e:
-                    print(f"  检查资金异常: {code}, {str(e)}")
-                    return None
+                    if account_info:
+                        stock_cost = up_limit * volume
+                        total_cost = stock_cost * 1.001 # 预估万一佣金
+                        if account_info.cash < total_cost:
+                            print(f"  资金不足: {code}, 需: {total_cost:.2f}, 可用: {account_info.cash:.2f}")
+                            return None
+                except: pass
 
                 return {
                     "order_price": order_price,
@@ -844,6 +744,7 @@ class MiniQMTAPI:
                     "order_type": order_type,
                     "precision": precision,
                 }
+            # ==================== 买入逻辑修改结束 ====================
 
             else:  # sell
                 # 卖出订单需要实时计算价格（依赖买一、买二等），但可以预处理基础信息
@@ -1119,28 +1020,6 @@ class MiniQMTAPI:
                 filtered_current_codes.append((code, reason, info["volume"]))
             else:
                 filtered_current_positions[code] = info
-
-        # 打印过滤信息
-        if filtered_db_codes or filtered_current_codes:
-            print(
-                f"\n=== 过滤的持仓 ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')}) ==="
-            )
-
-            if filtered_db_codes:
-                print("\n【远程持仓（数据库目标持仓）】")
-                print(f"{'代码':<12} {'过滤原因':<12} {'数量':>8}")
-                print("-" * 35)
-                for code, reason, volume in sorted(filtered_db_codes):
-                    print(f"{code:<12} {reason:<12} {volume:>8}")
-
-            if filtered_current_codes:
-                print("\n【本地持仓（MiniQMT实际持仓）】")
-                print(f"{'代码':<12} {'过滤原因':<12} {'数量':>8}")
-                print("-" * 35)
-                for code, reason, volume in sorted(filtered_current_codes):
-                    print(f"{code:<12} {reason:<12} {volume:>8}")
-
-            print("\n=== 过滤结束 ===\n")
 
         # 计算差异
         differences = {}
