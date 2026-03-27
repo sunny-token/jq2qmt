@@ -172,7 +172,7 @@ class G:
         self.sync_start_hour = 9  # 持仓同步开始时间（小时）
         self.sync_start_minute = 26  # 持仓同步开始时间（分钟），从9:26开始同步
         self.sync_start_millisecond = 0  # 持仓同步开始时间（毫秒），支持毫秒级精度
-        self.market_open_delay = 30  # 9:30开盘时下单延迟（秒），由0修改为0.2
+        self.market_open_delay = 10  # 9:30开盘时下单延迟（秒），由0修改为0.2
         self.use_protected_market_order = True  # 是否使用保护限价市价单，True时在9:30使用市价单（最优五档剩转限/即时成交剩余撤销），可避免价格笼子限制导致废单
         self.pending_orders = (
             None  # 待执行的交易操作记录（9:26-9:30之间记录，9:30后执行）
@@ -873,19 +873,29 @@ class MiniQMTAPI:
             account = StockAccount(self.account_id)
             orders = self.trader.query_stock_orders(account)
 
-            # 过滤未完成订单（排除已完成的订单状态）
-            pending_orders = [
-                order
-                for order in orders
-                if order.order_status
-                not in [
+            # 过滤未完成订单 (排除已完成状态)，并应用代码过滤逻辑 (排除打新/基金等无须同步的证券)
+            pending_orders = []
+            filtered_count = 0
+            for order in orders:
+                # 排除已完成的状态
+                if order.order_status in [
                     ORDER_STATUS_ALLTRADED,
                     ORDER_STATUS_CANCELED,
                     ORDER_STATUS_REJECTED,
-                ]
-            ]
+                ]:
+                    continue
+                
+                # 排除不在同步范围内的证券（如新股/新债申购、ETF、基金等）
+                should_filter, _ = self._should_filter_position(order.stock_code)
+                if should_filter:
+                    filtered_count += 1
+                else:
+                    pending_orders.append(order)
 
-            print("\n当前所有订单状态：")
+            if filtered_count > 0:
+                print(f"\n当前未完成订单状态 (已过滤 {filtered_count} 条打新/基金等无须同步的报单)：")
+            else:
+                print("\n当前所有未完成订单状态：")
             print(
                 f"{'订单编号':<12} {'代码':<10} {'方向':<6} {'总数量':>8} {'成交量':>8} "
                 f"{'价格':>8} {'状态':>6}"
@@ -1400,8 +1410,8 @@ class MiniQMTAPI:
                 direction == "buy"
                 and now.hour == 9
                 and now.minute == 30
-                and now.second < 2
-            )  # 9:30:00-9:30:02之间认为是开盘时间
+                and now.second < 60
+            )  # 9:30:00-9:31之间认为是开盘时间
 
             # 如果在开盘时间，延迟下单（避免交易所未准备好）
             if is_market_open_time and g.market_open_delay > 0:
